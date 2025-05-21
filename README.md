@@ -101,9 +101,83 @@ instr = QAlchemyInitialize(
 instr.definition.draw(fold=-1)
 ```
 
-### PennyLane
+### PennyLane Example
 
-Will come soon!
+```python
+import numpy as np
+import pennylane as qml
+from sklearn.datasets import fetch_openml
+
+from q_alchemy.pennylane_integration import QAlchemyStatePreparation, OptParams
+
+mnist = fetch_openml('mnist_784', version=1, parser="auto")
+
+zero: np.ndarray = mnist.data[mnist.target == "0"].iloc[0].to_numpy()
+filler = np.empty(2 ** 10 - zero.shape[0])
+filler.fill(0)
+
+zero = np.hstack([zero, filler])
+zero = zero / np.linalg.norm(zero)
+
+dev = qml.device('lightning.qubit', wires=10)
+
+@qml.qnode(dev)
+def circuit(state=None):
+    QAlchemyStatePreparation(
+        state,
+        wires=range(10),
+        opt_params=OptParams(
+            max_fidelity_loss=0.1,
+            basis_gates=["id", "rx", "ry", "rz", "cx"],
+            api_key="<your api key>"
+        )
+    )
+    return qml.state()
+
+print(qml.draw(circuit, level="device", max_length=100)(zero.tolist()))
+```
+
+### Broadcasting with PennyLane
+
+PennyLane provides native support for *broadcasting*, which allows quantum nodes to process batches of inputs efficiently. This is particularly useful in machine learning applications where inputs often come in batches. When broadcasting is used in conjunction with Q-Alchemy, each state in the batch is individually prepared using Q-Alchemy's circuit synthesis capabilities.
+
+> ⚠️ **Note:** For simulators or backends that support native state initialization using the `StatePrep` gate—such as `default.qubit`, and `lightning.qubit`—the state vector is injected directly without any decomposition into quantum gates. In this case, Q-Alchemy is not used. This behavior is ideal for rapid prototyping and testing. Switching to a hardware backend (or one without native state prep) will automatically invoke Q-Alchemy for state preparation.
+
+#### Broadcasting Example with `qiskit.aer`
+
+```python
+import numpy as np
+import pennylane as qml
+import torch
+
+from q_alchemy.pennylane_integration import AmplitudeEmbedding, OptParams
+from sklearn.datasets import make_moons
+
+# Sample data
+X, _ = make_moons(n_samples=5, noise=0.1)
+X = X / np.linalg.norm(X, axis=1, keepdims=True)  # Normalize each row for amplitude embedding
+
+# Create PennyLane device
+dev = qml.device("qiskit.aer", wires=1)
+
+@qml.qnode(dev, interface="torch")
+def circuit(x):
+    AmplitudeEmbedding(
+        x,
+        wires=[0],
+        opt_params=OptParams(
+            max_fidelity_loss=0.0,
+            api_key="<your api key>"
+        )
+    )
+    return qml.expval(qml.PauliZ(0))
+
+# Run the circuit on a batch of inputs
+X_tensor = torch.tensor(X, dtype=torch.float64)
+print(qml.draw(circuit, level="device", max_length=100)(X_tensor))
+```
+
+This example demonstrates how batched data can be processed using broadcasting with `AmplitudeEmbedding`, and how Q-Alchemy is triggered on simulators like `qiskit.aer`. When moving to real hardware or gate-based backends that lack `StatePrep` gate, Q-Alchemy will transparently handle the state preparation.
 
 ### Developer UI
 
